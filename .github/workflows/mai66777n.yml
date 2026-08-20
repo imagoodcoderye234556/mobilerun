@@ -163,7 +163,7 @@ jobs:
             $s = [math]::Floor($remaining.TotalSeconds % 60)
             $f = $frames[([int]((Get-Date)-$startTime).TotalSeconds) % $frames.Length]
 
-            Write-Host "`r$f ⏳ Còn lại: $h:$('{0:d2}' -f $m):$('{0:d2}' -f $s) - 🟢 HOẠT ĐỘNG" -NoNewline -ForegroundColor Cyan
+            Write-Host "`r$f ⏳ Còn lại: ${h}:$('{0:d2}' -f $m):$('{0:d2}' -f $s) - 🟢 HOẠT ĐỘNG" -NoNewline -ForegroundColor Cyan
 
             Start-Sleep -Seconds 5
           } while ($true)
