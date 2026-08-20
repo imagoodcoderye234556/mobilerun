@@ -158,9 +158,9 @@ jobs:
             $remaining = $endTime - $now
             if ($remaining.TotalSeconds -le 0) { break }
 
-            $h = [math]::Floor($remaining.TotalHours)
-            $m = [math]::Floor($remaining.TotalMinutes % 60)
-            $s = [math]::Floor($remaining.TotalSeconds % 60)
+            $h = [int][math]::Floor($remaining.TotalHours)
+            $m = [int][math]::Floor($remaining.TotalMinutes % 60)
+            $s = [int][math]::Floor($remaining.TotalSeconds % 60)
             $f = $frames[([int]((Get-Date)-$startTime).TotalSeconds) % $frames.Length]
 
             Write-Host "`r$f ⏳ Còn lại: ${h}:$('{0:d2}' -f $m):$('{0:d2}' -f $s) - 🟢 HOẠT ĐỘNG" -NoNewline -ForegroundColor Cyan
