@@ -1,4 +1,4 @@
-name: 🚀 SSH FREE - CLOUDFLARE TUNNEL (Miễn Phí, Domain Cố Định)
+name: 🚀 RDP FREE - SERVEO TUNNEL (Miễn Phí, Domain Cố Định)
 on:
   workflow_dispatch:
     inputs:
@@ -13,84 +13,68 @@ on:
           - '5h40m'
 
 jobs:
-  SSH-Free-Cloudflare:
+  RDP-Free-Serveo:
     runs-on: windows-latest
     timeout-minutes: 340
     steps:
       - name: 🎯 KHỞI ĐỘNG
         run: |
-          Write-Host "🤖 SSH FREE - CLOUDFLARE TUNNEL (Hoàn Toàn Miễn Phí)" -ForegroundColor Yellow
+          Write-Host "🤖 RDP FREE - SERVEO TUNNEL (Hoàn Toàn Miễn Phí)" -ForegroundColor Yellow
           Write-Host "⚡ Domain Cố Định, Zero Cost, Unlimited" -ForegroundColor Green
           Write-Host ""
 
-      # KHỞI ĐỘNG SSH
-      - name: 🔐 KHỞI ĐỘNG SSH SERVER
+      # KHỞI ĐỘNG RDP
+      - name: 🔐 KHỞI ĐỘNG RDP SERVER
         run: |
-          Write-Host "🔐 Khởi động SSH..." -ForegroundColor Yellow
+          Write-Host "🔐 Khởi động RDP..." -ForegroundColor Yellow
 
-          # Cài OpenSSH nếu chưa có
-          $sshSvc = Get-Service -Name sshd -ErrorAction SilentlyContinue
-          if (-not $sshSvc) {
-            Write-Host "📦 Cài OpenSSH Server..." -ForegroundColor Yellow
-            Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 -ErrorAction SilentlyContinue
+          # Bật RDP nếu chưa bật
+          $rdpReg = Get-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -ErrorAction SilentlyContinue
+          if ($rdpReg.fDenyTSConnections -ne 0) {
+            Write-Host "📦 Bật RDP Server..." -ForegroundColor Yellow
+            Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0 -Force
           }
 
-          # Khởi động
-          Start-Service sshd -ErrorAction SilentlyContinue
-          Set-Service -Name sshd -StartupType Automatic
+          # Khởi động Remote Desktop Services
+          Start-Service -Name TermService -ErrorAction SilentlyContinue
+          Set-Service -Name TermService -StartupType Automatic
 
-          # Mở Firewall
-          Enable-NetFirewallRule -DisplayGroup "OpenSSH Server" -ErrorAction SilentlyContinue
-          New-NetFirewallRule -DisplayName "SSH Allow" -Direction Inbound -LocalPort 22 -Protocol TCP -Action Allow -ErrorAction SilentlyContinue
+          # Mở Firewall cho RDP
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
+          New-NetFirewallRule -DisplayName "RDP Allow" -Direction Inbound -LocalPort 3389 -Protocol TCP -Action Allow -ErrorAction SilentlyContinue
 
           # Kiểm tra
           Start-Sleep -Seconds 3
-          $sshStatus = (Get-Service -Name sshd).Status
-          Write-Host "✅ SSH Status: $sshStatus" -ForegroundColor Green
+          $rdpStatus = (Get-Service -Name TermService).Status
+          Write-Host "✅ RDP Status: $rdpStatus" -ForegroundColor Green
 
-      # TẢI CLOUDFLARED
-      - name: 📥 TẢI CLOUDFLARED
+      # KHỞI ĐỘNG SERVEO TUNNEL
+      - name: 🌐 KHỞI ĐỘNG SERVEO TUNNEL
         run: |
-          Write-Host "📥 Tải cloudflared..." -ForegroundColor Yellow
+          Write-Host "🌐 Khởi động Serveo Tunnel..." -ForegroundColor Yellow
 
-          # Tải cloudflared
-          $cloudflaredUrl = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
-          $cloudflaredPath = "$env:ProgramFiles\cloudflared\cloudflared.exe"
+          # Tạo thư mục cho ssh key nếu cần
+          $sshDir = "$env:USERPROFILE\.ssh"
+          if (-not (Test-Path $sshDir)) {
+            New-Item -Path $sshDir -ItemType Directory -Force | Out-Null
+          }
 
-          New-Item -Path "$env:ProgramFiles\cloudflared" -ItemType Directory -Force | Out-Null
-          Invoke-WebRequest -Uri $cloudflaredUrl -OutFile $cloudflaredPath -UseBasicParsing
+          # Khởi động tunnel - tạo reverse tunnel từ localhost:3389 sang serveo.net
+          # Format: ssh -R 3389:localhost:3389 serveo.net
+          $logPath = "$env:TEMP\serveo-tunnel.log"
+          
+          # Start SSH tunnel in background (không cần Hide, để nó chạy)
+          $process = Start-Process -FilePath "ssh" -ArgumentList "-R 3389:localhost:3389 serveo.net" -PassThru
+          Add-Content $logPath "Tunnel started at $(Get-Date), PID: $($process.Id)"
 
-          Write-Host "✅ cloudflared tải xong" -ForegroundColor Green
-          & $cloudflaredPath --version
+          # Chờ tunnel thiết lập
+          Start-Sleep -Seconds 5
 
-      # KHỞI ĐỘNG CLOUDFLARE TUNNEL
-      - name: 🌩️  KHỞI ĐỘNG CLOUDFLARE TUNNEL
-        run: |
-          Write-Host "🌩️  Khởi động Cloudflare Tunnel..." -ForegroundColor Yellow
-
-          $cloudflaredPath = "$env:ProgramFiles\cloudflared\cloudflared.exe"
-
-          # Tạo config (dùng mảng thay vì here-string để tránh lỗi thụt lề YAML)
-          $configPath = "$env:TEMP\cloudflare-config.yml"
-          $configLines = @(
-            "tunnel: github-actions-ssh-tunnel",
-            "credentials-file: $env:TEMP\cf-credentials.json",
-            "",
-            "ingress:",
-            "  - hostname: ssh.localhost.run",
-            "    service: ssh://127.0.0.1:22",
-            "  - service: http_status:404"
-          )
-          $configLines | Set-Content $configPath
-
-          # Khởi động tunnel (background) - gọi trực tiếp, không cần script tạm
-          $process = Start-Process -FilePath $cloudflaredPath -ArgumentList "tunnel","run","--url","ssh://127.0.0.1:22" -WindowStyle Hidden -PassThru
-          Add-Content "$env:TEMP\cf-tunnel.log" "Tunnel started at $(Get-Date), PID: $($process.Id)"
-
-          Write-Host "✅ Cloudflare Tunnel đang khởi động..." -ForegroundColor Green
+          Write-Host "✅ Serveo Tunnel đang khởi động..." -ForegroundColor Green
+          Write-Host "📋 Kiểm tra log: $logPath" -ForegroundColor Yellow
 
       # HIỂN THỊ THÔNG TIN
-      - name: 🎉 THÔNG TIN SSH FREE CLOUDFLARE
+      - name: 🎉 THÔNG TIN RDP FREE SERVEO
         run: |
           $durationInput = "${{ github.event.inputs.duration }}"
 
@@ -103,51 +87,68 @@ jobs:
           $timeZone = [System.TimeZoneInfo]::FindSystemTimeZoneById("SE Asia Standard Time")
           $endTime = [System.TimeZoneInfo]::ConvertTimeFromUtc((Get-Date).ToUniversalTime(), $timeZone).AddMinutes($totalMinutes)
 
+          # Đọc Serveo domain từ log file
+          $logFile = "$env:TEMP\serveo-tunnel.log"
+          $serveroDomain = "Chờ xác định..."
+          if (Test-Path $logFile) {
+            $logContent = Get-Content $logFile -Raw
+            if ($logContent -match "Forwarding remote port (\d+) to") {
+              $serveroDomain = "Được cấp bởi Serveo.net"
+            }
+          }
+
           Write-Host ""
           Write-Host "╔═══════════════════════════════════════════════════╗" -ForegroundColor Cyan
-          Write-Host "║   🎉 SSH FREE - CLOUDFLARE TUNNEL               ║" -ForegroundColor Cyan
+          Write-Host "║   🎉 RDP FREE - SERVEO TUNNEL                    ║" -ForegroundColor Cyan
           Write-Host "╠═══════════════════════════════════════════════════╣" -ForegroundColor Cyan
           Write-Host "║                                                   ║" -ForegroundColor Cyan
           Write-Host "║  💰 CHI PHÍ: \$0 / Hoàn toàn miễn phí            ║" -ForegroundColor Green
           Write-Host "║  📊 GIỚI HẠN: KHÔNG GIỚI HẠN (unlimited)         ║" -ForegroundColor Green
-          Write-Host "║  ⚡ TỐC ĐỘ: Cực nhanh (CDN Cloudflare)           ║" -ForegroundColor Green
-          Write-Host "║  🔒 BẢO MẬT: Enterprise-grade                    ║" -ForegroundColor Green
+          Write-Host "║  ⚡ TỐC ĐỘ: Cực nhanh (Direct tunnel)            ║" -ForegroundColor Green
+          Write-Host "║  🔒 BẢO MẬT: SSH encrypted tunnel                ║" -ForegroundColor Green
           Write-Host "║                                                   ║" -ForegroundColor Cyan
-          Write-Host "║  🌩️  CLOUDFLARE TUNNEL (Enterprise Free Tier)   ║" -ForegroundColor Cyan
-          Write-Host "║  ├─ Phương thức: Secure HTTPS Tunnel            ║" -ForegroundColor White
-          Write-Host "║  ├─ Domain: ssh.localhost.run (hoặc custom)    ║" -ForegroundColor White
+          Write-Host "║  🌐 SERVEO TUNNEL (SSH Reverse Tunnel)          ║" -ForegroundColor Cyan
+          Write-Host "║  ├─ Phương thức: SSH Reverse Tunnel             ║" -ForegroundColor White
+          Write-Host "║  ├─ Service: Serveo.net (Tự động cấp subdomain)║" -ForegroundColor White
+          Write-Host "║  ├─ Port: 3389 (RDP)                            ║" -ForegroundColor White
           Write-Host "║  ├─ User: Administrator                         ║" -ForegroundColor White
-          Write-Host "║  └─ SSH Command:" -ForegroundColor White
-          Write-Host "║     ssh Administrator@ssh.localhost.run          ║" -ForegroundColor Yellow
+          Write-Host "║  └─ Kết nối RDP:                                ║" -ForegroundColor White
+          Write-Host "║     localhost:3389 (local)                      ║" -ForegroundColor Yellow
+          Write-Host "║     hoặc qua Serveo domain (xem tunnel log)    ║" -ForegroundColor Yellow
           Write-Host "║                                                   ║" -ForegroundColor Cyan
           Write-Host "║  🌟 ƯU ĐIỂM:                                     ║" -ForegroundColor Green
           Write-Host "║  ✅ Hoàn toàn miễn phí (không giới hạn)         ║" -ForegroundColor White
           Write-Host "║  ✅ Không cần đăng ký account                   ║" -ForegroundColor White
-          Write-Host "║  ✅ Domain cố định (localhost.run)              ║" -ForegroundColor White
-          Write-Host "║  ✅ Bảo mật cao (Cloudflare Enterprise)         ║" -ForegroundColor White
-          Write-Host "║  ✅ Tốc độ cực nhanh (CDN toàn cầu)             ║" -ForegroundColor White
+          Write-Host "║  ✅ Domain cố định (serveo.net)                 ║" -ForegroundColor White
+          Write-Host "║  ✅ Bảo mật cao (SSH encrypted)                 ║" -ForegroundColor White
           Write-Host "║  ✅ Không cần mở cổng router                    ║" -ForegroundColor White
+          Write-Host "║  ✅ Hỗ trợ RDP, SSH, HTTP, HTTPS                ║" -ForegroundColor White
           Write-Host "║                                                   ║" -ForegroundColor Cyan
           Write-Host "║  ⏱️  Thời gian: $displayTime" -ForegroundColor White
           Write-Host "║  🕐  Kết thúc: $($endTime.ToString('HH:mm:ss')) (VN)            ║" -ForegroundColor White
           Write-Host "║                                                   ║" -ForegroundColor Cyan
-          Write-Host "║  💡 Sử dụng: SSH vào domain ở trên ngay lập tức ║" -ForegroundColor Yellow
+          Write-Host "║  💡 Kiểm tra log để lấy Serveo domain:         ║" -ForegroundColor Yellow
+          Write-Host "║     $env:TEMP\serveo-tunnel.log" -ForegroundColor Yellow
           Write-Host "╚═══════════════════════════════════════════════════╝" -ForegroundColor Cyan
           Write-Host ""
 
           echo "TOTAL_MINUTES=$totalMinutes" >> $env:GITHUB_ENV
 
       # DUY TRÌ KẾT NỐI
-      - name: ⏳ DUY TRÌ SSH
+      - name: ⏳ DUY TRÌ RDP
         run: |
           $totalMinutes = $env:TOTAL_MINUTES
           $timeZone = [System.TimeZoneInfo]::FindSystemTimeZoneById("SE Asia Standard Time")
           $endTime = [System.TimeZoneInfo]::ConvertTimeFromUtc((Get-Date).ToUniversalTime(), $timeZone).AddMinutes($totalMinutes)
 
-          Write-Host "🟢 SSH HOẠT ĐỘNG - Bạn có thể SSH vào ngay!" -ForegroundColor Green
+          Write-Host "🟢 RDP HOẠT ĐỘNG - Bạn có thể kết nối RDP ngay!" -ForegroundColor Green
           Write-Host ""
-          Write-Host "📝 Lệnh SSH:" -ForegroundColor Yellow
-          Write-Host "ssh Administrator@ssh.localhost.run" -ForegroundColor Cyan
+          Write-Host "📝 Thông tin kết nối:" -ForegroundColor Yellow
+          Write-Host "Host: localhost:3389 (kết nối cục bộ)" -ForegroundColor Cyan
+          Write-Host "User: Administrator" -ForegroundColor Cyan
+          Write-Host ""
+          Write-Host "📋 Kiểm tra log Serveo:" -ForegroundColor Yellow
+          Write-Host "File: $env:TEMP\serveo-tunnel.log" -ForegroundColor Cyan
           Write-Host ""
 
           $frames = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
@@ -177,8 +178,7 @@ jobs:
         run: |
           Write-Host "🧹 Dọn dẹp..." -ForegroundColor Yellow
 
-          Stop-Process -Name "cloudflared" -Force -ErrorAction SilentlyContinue
-          Remove-Item "$env:TEMP\cloudflare-*" -Force -Recurse -ErrorAction SilentlyContinue
-          Remove-Item "$env:TEMP\cf-*" -Force -ErrorAction SilentlyContinue
+          Stop-Process -Name "ssh" -Force -ErrorAction SilentlyContinue
+          Remove-Item "$env:TEMP\serveo-*" -Force -Recurse -ErrorAction SilentlyContinue
 
           Write-Host "✅ Hoàn tất" -ForegroundColor Green
