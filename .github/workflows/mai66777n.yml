@@ -27,22 +27,22 @@ jobs:
       - name: 🔐 KHỞI ĐỘNG SSH SERVER
         run: |
           Write-Host "🔐 Khởi động SSH..." -ForegroundColor Yellow
-          
+
           # Cài OpenSSH nếu chưa có
           $sshSvc = Get-Service -Name sshd -ErrorAction SilentlyContinue
           if (-not $sshSvc) {
             Write-Host "📦 Cài OpenSSH Server..." -ForegroundColor Yellow
             Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 -ErrorAction SilentlyContinue
           }
-          
+
           # Khởi động
           Start-Service sshd -ErrorAction SilentlyContinue
           Set-Service -Name sshd -StartupType Automatic
-          
+
           # Mở Firewall
           Enable-NetFirewallRule -DisplayGroup "OpenSSH Server" -ErrorAction SilentlyContinue
           New-NetFirewallRule -DisplayName "SSH Allow" -Direction Inbound -LocalPort 22 -Protocol TCP -Action Allow -ErrorAction SilentlyContinue
-          
+
           # Kiểm tra
           Start-Sleep -Seconds 3
           $sshStatus = (Get-Service -Name sshd).Status
@@ -52,14 +52,14 @@ jobs:
       - name: 📥 TẢI CLOUDFLARED
         run: |
           Write-Host "📥 Tải cloudflared..." -ForegroundColor Yellow
-          
+
           # Tải cloudflared
           $cloudflaredUrl = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
           $cloudflaredPath = "$env:ProgramFiles\cloudflared\cloudflared.exe"
-          
+
           New-Item -Path "$env:ProgramFiles\cloudflared" -ItemType Directory -Force | Out-Null
           Invoke-WebRequest -Uri $cloudflaredUrl -OutFile $cloudflaredPath -UseBasicParsing
-          
+
           Write-Host "✅ cloudflared tải xong" -ForegroundColor Green
           & $cloudflaredPath --version
 
@@ -67,49 +67,42 @@ jobs:
       - name: 🌩️  KHỞI ĐỘNG CLOUDFLARE TUNNEL
         run: |
           Write-Host "🌩️  Khởi động Cloudflare Tunnel..." -ForegroundColor Yellow
-          
-          $cloudflaredPath = "$env:ProgramFiles\cloudflared\cloudflared.exe"
-          
-          # Tạo config
-          $configPath = "$env:TEMP\cloudflare-config.yml"
-          @"
-tunnel: github-actions-ssh-tunnel
-credentials-file: $env:TEMP\cf-credentials.json
 
-ingress:
-  - hostname: ssh.localhost.run
-    service: ssh://127.0.0.1:22
-  - service: http_status:404
-"@ | Set-Content $configPath
-          
-          # Khởi động tunnel (background)
-          # Lưu ý: Cloudflare Tunnel yêu cầu authentication, nhưng chúng ta dùng quick mode
-          
-          # Tạo script khởi động
-          $scriptPath = "$env:TEMP\start-cf-tunnel.ps1"
-          @"
-          `$process = Start-Process -FilePath "$cloudflaredPath" -ArgumentList "tunnel", "run", "--url", "ssh://127.0.0.1:22" -WindowStyle Hidden -PassThru
-          Add-Content "$env:TEMP\cf-tunnel.log" "Tunnel started at `$(Get-Date)"
-          "@ | Set-Content $scriptPath
-          
-          Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File $scriptPath" -WindowStyle Hidden
-          
+          $cloudflaredPath = "$env:ProgramFiles\cloudflared\cloudflared.exe"
+
+          # Tạo config (dùng mảng thay vì here-string để tránh lỗi thụt lề YAML)
+          $configPath = "$env:TEMP\cloudflare-config.yml"
+          $configLines = @(
+            "tunnel: github-actions-ssh-tunnel",
+            "credentials-file: $env:TEMP\cf-credentials.json",
+            "",
+            "ingress:",
+            "  - hostname: ssh.localhost.run",
+            "    service: ssh://127.0.0.1:22",
+            "  - service: http_status:404"
+          )
+          $configLines | Set-Content $configPath
+
+          # Khởi động tunnel (background) - gọi trực tiếp, không cần script tạm
+          $process = Start-Process -FilePath $cloudflaredPath -ArgumentList "tunnel","run","--url","ssh://127.0.0.1:22" -WindowStyle Hidden -PassThru
+          Add-Content "$env:TEMP\cf-tunnel.log" "Tunnel started at $(Get-Date), PID: $($process.Id)"
+
           Write-Host "✅ Cloudflare Tunnel đang khởi động..." -ForegroundColor Green
 
       # HIỂN THỊ THÔNG TIN
       - name: 🎉 THÔNG TIN SSH FREE CLOUDFLARE
         run: |
           $durationInput = "${{ github.event.inputs.duration }}"
-          
+
           switch ($durationInput) {
             "1h" { $totalMinutes = 60; $displayTime = "1 giờ" }
             "3h" { $totalMinutes = 180; $displayTime = "3 giờ" }
             "5h40m" { $totalMinutes = 340; $displayTime = "5 giờ 40 phút" }
           }
-          
+
           $timeZone = [System.TimeZoneInfo]::FindSystemTimeZoneById("SE Asia Standard Time")
           $endTime = [System.TimeZoneInfo]::ConvertTimeFromUtc((Get-Date).ToUniversalTime(), $timeZone).AddMinutes($totalMinutes)
-          
+
           Write-Host ""
           Write-Host "╔═══════════════════════════════════════════════════╗" -ForegroundColor Cyan
           Write-Host "║   🎉 SSH FREE - CLOUDFLARE TUNNEL               ║" -ForegroundColor Cyan
@@ -141,7 +134,7 @@ ingress:
           Write-Host "║  💡 Sử dụng: SSH vào domain ở trên ngay lập tức ║" -ForegroundColor Yellow
           Write-Host "╚═══════════════════════════════════════════════════╝" -ForegroundColor Cyan
           Write-Host ""
-          
+
           echo "TOTAL_MINUTES=$totalMinutes" >> $env:GITHUB_ENV
 
       # DUY TRÌ KẾT NỐI
@@ -150,31 +143,31 @@ ingress:
           $totalMinutes = $env:TOTAL_MINUTES
           $timeZone = [System.TimeZoneInfo]::FindSystemTimeZoneById("SE Asia Standard Time")
           $endTime = [System.TimeZoneInfo]::ConvertTimeFromUtc((Get-Date).ToUniversalTime(), $timeZone).AddMinutes($totalMinutes)
-          
+
           Write-Host "🟢 SSH HOẠT ĐỘNG - Bạn có thể SSH vào ngay!" -ForegroundColor Green
           Write-Host ""
           Write-Host "📝 Lệnh SSH:" -ForegroundColor Yellow
           Write-Host "ssh Administrator@ssh.localhost.run" -ForegroundColor Cyan
           Write-Host ""
-          
+
           $frames = @('⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏')
           $startTime = Get-Date
-          
+
           do {
             $now = [System.TimeZoneInfo]::ConvertTimeFromUtc((Get-Date).ToUniversalTime(), $timeZone)
             $remaining = $endTime - $now
             if ($remaining.TotalSeconds -le 0) { break }
-            
+
             $h = [math]::Floor($remaining.TotalHours)
             $m = [math]::Floor($remaining.TotalMinutes % 60)
             $s = [math]::Floor($remaining.TotalSeconds % 60)
             $f = $frames[([int]((Get-Date)-$startTime).TotalSeconds) % $frames.Length]
-            
+
             Write-Host "`r$f ⏳ Còn lại: $h:$('{0:d2}' -f $m):$('{0:d2}' -f $s) - 🟢 HOẠT ĐỘNG" -NoNewline -ForegroundColor Cyan
-            
+
             Start-Sleep -Seconds 5
           } while ($true)
-          
+
           Write-Host ""
           Write-Host "⛔ Hết thời gian" -ForegroundColor Red
 
@@ -183,10 +176,9 @@ ingress:
         if: always()
         run: |
           Write-Host "🧹 Dọn dẹp..." -ForegroundColor Yellow
-          
+
           Stop-Process -Name "cloudflared" -Force -ErrorAction SilentlyContinue
           Remove-Item "$env:TEMP\cloudflare-*" -Force -Recurse -ErrorAction SilentlyContinue
           Remove-Item "$env:TEMP\cf-*" -Force -ErrorAction SilentlyContinue
-          Remove-Item "$env:TEMP\start-cf-tunnel.ps1" -Force -ErrorAction SilentlyContinue
-          
+
           Write-Host "✅ Hoàn tất" -ForegroundColor Green
